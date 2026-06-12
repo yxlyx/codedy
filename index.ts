@@ -73,6 +73,114 @@ async function chat(msgs: Message[]): Promise<ChatResponse> {
   return res.json() as Promise<ChatResponse>;
 }
 
+// ─── Compaction (prevents context rot) ────────────────────────────
+const COMPACT_THRESHOLD = parseInt(Bun.env.COMPACT_THRESHOLD ?? "30", 10);
+
+function renderTranscript(msgs: Message[]): string {
+  return msgs
+    .filter(m => m.role !== "system")
+    .map(m => {
+      if (m.role === "assistant" && m.tool_calls?.length) {
+        const calls = m.tool_calls
+          .map(tc => `${tc.function.name}(${tc.function.arguments})`)
+          .join(", ");
+        return `ASSISTANT: ${m.content ?? ""}\n  -> tool calls: ${calls}`;
+      }
+      if (m.role === "tool") return `TOOL RESULT (${m.name}): ${m.content}`;
+      return `${m.role.toUpperCase()}: ${m.content ?? ""}`;
+    })
+    .join("\n");
+}
+
+async function summarize(msgs: Message[]): Promise<string> {
+  const res = await fetch(`${BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "deepseek-v4-pro",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You compress an agent's working trajectory into a dense summary so it can continue without the full history. Output these sections:\n" +
+            "1. GOAL: the original task.\n" +
+            "2. PROGRESS: what has been done so far, with key command results.\n" +
+            "3. FILES: every file path read/created/modified and a one-line note of its contents/purpose so they can be relocated.\n" +
+            "4. TASK STATE: current status of tasks in /tmp/tasks.json.\n" +
+            "5. NEXT STEPS: the immediate actions still required.\n" +
+            "Be specific with paths and facts. Do not invent anything.",
+        },
+        { role: "user", content: `Summarize this trajectory:\n\n${renderTranscript(msgs)}` },
+      ],
+    }),
+  });
+  const data = (await res.json()) as ChatResponse;
+  return data.choices[0]?.message?.content ?? "(summary unavailable)";
+}
+
+// Linked compaction: raw messages are archived to disk and referenced by id,
+// so the model can follow the link via the `recall` tool to read them back.
+const ARCHIVE_DIR = Bun.env.ARCHIVE_DIR ?? "/tmp/harness_archive";
+let archiveSeq = 0;
+
+async function archiveMessages(msgs: Message[]): Promise<string> {
+  archiveSeq++;
+  const id = `seg-${archiveSeq}`;
+  await Bun.write(`${ARCHIVE_DIR}/${id}.json`, JSON.stringify(msgs, null, 2));
+  return id;
+}
+
+function manifest(msgs: Message[]): string {
+  return msgs
+    .map((m, i) => {
+      const preview = (m.content ?? (m.tool_calls?.length ? "[tool calls]" : "")).slice(0, 80);
+      return `  [${i}] ${m.role}${m.name ? `(${m.name})` : ""}: ${preview}`;
+    })
+    .join("\n");
+}
+
+async function compact(msgs: Message[]): Promise<void> {
+  const system: Message = msgs[0] ?? { role: "system", content: "" };
+  const body = msgs.slice(1);
+  const summary = await summarize(msgs);
+  const archiveId = await archiveMessages(body);
+  const link =
+    `[CONTEXT SUMMARY OF PRIOR WORK]\n\n` +
+    `Raw history archived as "${archiveId}" (${body.length} messages). ` +
+    `Call recall with {"archive_id":"${archiveId}"} for the manifest, or ` +
+    `{"archive_id":"${archiveId}","index":N} to read a specific raw message.\n\n` +
+    summary;
+  msgs.splice(0, msgs.length,
+    system,
+    { role: "user", content: link },
+  );
+  console.log(`Compacted history -> archived ${body.length} msgs as ${archiveId}, now ${msgs.length} messages`);
+}
+
+async function recall(args: Record<string, unknown>): Promise<string> {
+  const archiveId = args.archive_id as string;
+  if (!archiveId || typeof archiveId !== "string") {
+    return JSON.stringify({ error: "archive_id must be a non-empty string" });
+  }
+  try {
+    const raw = await Bun.file(`${ARCHIVE_DIR}/${archiveId}.json`).text();
+    const msgs = JSON.parse(raw) as Message[];
+    if (args.index !== undefined) {
+      const i = Number(args.index);
+      if (!Number.isInteger(i) || i < 0 || i >= msgs.length) {
+        return JSON.stringify({ error: `index out of range (0..${msgs.length - 1})` });
+      }
+      return JSON.stringify(msgs[i]);
+    }
+    return JSON.stringify({ archive_id: archiveId, count: msgs.length, manifest: manifest(msgs) });
+  } catch {
+    return JSON.stringify({ error: `No archive segment: ${archiveId}` });
+  }
+}
+
 function get_weather(args: Record<string, unknown>): string {
   const location = args.location;
   const unit = args.unit ?? "celsius";
@@ -195,11 +303,35 @@ registerTool("access_sed", {
   fn: access_sed,
 });
 
+registerTool("recall", {
+  description:
+    "Retrieve archived raw messages from a compacted segment. Without index, returns a manifest listing each message; with index, returns that specific raw message.",
+  parameters: {
+    type: "object",
+    properties: {
+      archive_id: { type: "string", description: "The archive segment id, e.g. 'seg-1'" },
+      index: { type: "number", description: "Optional 0-based index of a specific message to retrieve" },
+    },
+    required: ["archive_id"],
+  },
+  fn: recall,
+});
+
+async function allTasksDone(): Promise<boolean> {
+  try {
+    const raw = await Bun.$`cat /tmp/tasks.json`.text();
+    const tasks = JSON.parse(raw) as Array<{ status: string }>;
+    return tasks.length > 0 && tasks.every(t => t.status === "done");
+  } catch {
+    return false;
+  }
+}
+
 let currentResponse = await chat(messages);
 let assistantMessage = currentResponse.choices[0]?.message;
 if (assistantMessage?.content) console.log("Thought:", assistantMessage.content);
 
-while (assistantMessage?.tool_calls?.length) {
+while (assistantMessage?.tool_calls?.length && !(await allTasksDone())) {
   messages.push({ role: assistantMessage.role, content: assistantMessage.content, tool_calls: assistantMessage.tool_calls });
 
   for (const toolCall of assistantMessage.tool_calls) {
@@ -228,6 +360,10 @@ while (assistantMessage?.tool_calls?.length) {
     });
   }
 
+  if (messages.length > COMPACT_THRESHOLD && !(await allTasksDone())) {
+    await compact(messages);
+  }
+
   currentResponse = await chat(messages);
   if (!currentResponse.choices) {
     console.error("Unexpected response:", JSON.stringify(currentResponse, null, 2));
@@ -237,4 +373,6 @@ while (assistantMessage?.tool_calls?.length) {
   if (assistantMessage?.content) console.log("Thought:", assistantMessage.content);
 }
 
+const done = await allTasksDone();
+if (done) console.log("All tasks completed.");
 console.log("Final answer:", assistantMessage?.content);
