@@ -1,6 +1,7 @@
 import "./tools";
 import { runTurn } from "./agent";
 import { allTasksDone } from "./tasks";
+import { c, infoLine, promptUser } from "./ui";
 import type { Message } from "./types";
 
 const messages: Message[] = [
@@ -11,30 +12,42 @@ const messages: Message[] = [
   },
 ];
 
-console.log("Interactive harness. Type a task and press enter. Commands: /exit to quit, /reset to clear history.");
-process.stdout.write("you> ");
+console.log(c.bold("Interactive harness") + c.dim(" — responses stream live"));
+console.log(c.dim("Commands: /exit quit · /reset clear history · /help show this"));
+console.log();
+promptUser();
 
 for await (const line of console) {
   const input = line.trim();
 
   if (!input) {
-    process.stdout.write("you> ");
+    promptUser();
     continue;
   }
   if (input === "/exit") break;
+  if (input === "/help") {
+    console.log(c.dim("Commands: /exit quit · /reset clear history · /help show this"));
+    promptUser();
+    continue;
+  }
   if (input === "/reset") {
     messages.splice(1, messages.length - 1);
-    console.log("History cleared.");
-    process.stdout.write("you> ");
+    infoLine("History cleared.");
+    promptUser();
     continue;
   }
 
   messages.push({ role: "user", content: input });
-  const answer = await runTurn(messages);
+  try {
+    const answer = await runTurn(messages);
+    if (!answer) infoLine("(no response)");
+  } catch (e) {
+    infoLine(`Turn failed: ${String(e)}`);
+  }
 
-  if (await allTasksDone()) console.log("All tasks completed.");
-  console.log(`agent> ${answer || "(no response)"}`);
-  process.stdout.write("you> ");
+  if (await allTasksDone()) infoLine("All tasks completed.");
+  console.log();
+  promptUser();
 }
 
-console.log("Bye.");
+console.log(c.dim("Bye."));
