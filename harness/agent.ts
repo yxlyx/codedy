@@ -3,7 +3,7 @@ import { chatStream } from "./chat";
 import { compact } from "./compaction";
 import { toolRegistry } from "./registry";
 import { allTasksDone } from "./tasks";
-import { agentLabel, errorLine, infoLine, toolLine, toolResultLine } from "./ui";
+import { agentLabel, c, errorLine, infoLine, toolLine, toolResultLine } from "./ui";
 import type { Message, ToolCall } from "./types";
 
 async function dispatchToolCall(toolCall: ToolCall): Promise<string> {
@@ -28,15 +28,43 @@ async function dispatchToolCall(toolCall: ToolCall): Promise<string> {
 }
 
 // Streams one assistant response, printing tokens live under the agent label.
+// Reasoning models emit "thinking" deltas before any content; we surface those
+// as a live dim indicator so the terminal never looks stuck.
 async function streamAssistant(messages: Message[]) {
   let printedLabel = false;
-  const msg = await chatStream(messages, token => {
-    if (!printedLabel) {
-      agentLabel();
-      printedLabel = true;
+  let thinkingChars = 0;
+
+  const clearThinking = () => {
+    if (thinkingChars > 0 && process.stdout.isTTY) {
+      process.stdout.write("\r\x1b[2K");
+    } else if (thinkingChars > 0) {
+      process.stdout.write("\n");
     }
-    process.stdout.write(token);
-  });
+    thinkingChars = 0;
+  };
+
+  const msg = await chatStream(
+    messages,
+    token => {
+      clearThinking();
+      if (!printedLabel) {
+        agentLabel();
+        printedLabel = true;
+      }
+      process.stdout.write(token);
+    },
+    () => {
+      if (printedLabel) return;
+      if (thinkingChars === 0) {
+        process.stdout.write(c.dim("thinking "));
+        thinkingChars = 9;
+      } else if (thinkingChars < 40) {
+        process.stdout.write(c.dim("."));
+        thinkingChars++;
+      }
+    },
+  );
+  clearThinking();
   if (printedLabel) process.stdout.write("\n");
   return msg;
 }
@@ -44,9 +72,14 @@ async function streamAssistant(messages: Message[]) {
 // Runs the agentic loop for one user turn. Mutates `messages` in place and
 // returns the final assistant text for the turn.
 export async function runTurn(messages: Message[]): Promise<string> {
+  // Only treat "all tasks done" as a stop signal if it became true during
+  // this turn — a stale tasks.json from a previous run must not block work.
+  const doneAtStart = await allTasksDone();
+  const justCompleted = async () => !doneAtStart && (await allTasksDone());
+
   let assistantMessage = await streamAssistant(messages);
 
-  while (assistantMessage.tool_calls?.length && !(await allTasksDone())) {
+  while (assistantMessage.tool_calls?.length && !(await justCompleted())) {
     messages.push({
       role: assistantMessage.role,
       content: assistantMessage.content,
@@ -69,7 +102,7 @@ export async function runTurn(messages: Message[]): Promise<string> {
       });
     });
 
-    if (messages.length > COMPACT_THRESHOLD && !(await allTasksDone())) {
+    if (messages.length > COMPACT_THRESHOLD && !(await justCompleted())) {
       infoLine("Compacting history...");
       await compact(messages);
     }

@@ -16,6 +16,7 @@ export async function chat(msgs: Message[]): Promise<ChatResponse> {
 
 type StreamDelta = {
   content?: string | null;
+  reasoning_content?: string | null;
   tool_calls?: Array<{
     index: number;
     id?: string;
@@ -36,6 +37,7 @@ export type AssistantMessage = {
 export async function chatStream(
   msgs: Message[],
   onToken: (token: string) => void,
+  onReasoning?: (token: string) => void,
 ): Promise<AssistantMessage> {
   const res = await fetch(`${BASE_URL}/chat/completions`, {
     method: "POST",
@@ -75,6 +77,10 @@ export async function chatStream(
         continue;
       }
       if (!delta) continue;
+
+      if (delta.reasoning_content) {
+        onReasoning?.(delta.reasoning_content);
+      }
 
       if (delta.content) {
         content += delta.content;
