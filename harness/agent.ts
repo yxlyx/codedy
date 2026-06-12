@@ -4,6 +4,7 @@ import { compact } from "./compaction";
 import { toolRegistry } from "./registry";
 import { allTasksDone } from "./tasks";
 import { agentLabel, c, errorLine, infoLine, toolLine, toolResultLine } from "./ui";
+import { MarkdownStream } from "./render";
 import type { Message, ToolCall } from "./types";
 
 async function dispatchToolCall(toolCall: ToolCall): Promise<string> {
@@ -43,15 +44,17 @@ async function streamAssistant(messages: Message[]) {
     thinkingChars = 0;
   };
 
+  const md = new MarkdownStream();
   const msg = await chatStream(
     messages,
     token => {
       clearThinking();
       if (!printedLabel) {
         agentLabel();
+        process.stdout.write("\n");
         printedLabel = true;
       }
-      process.stdout.write(token);
+      md.feed(token);
     },
     () => {
       if (printedLabel) return;
@@ -65,6 +68,7 @@ async function streamAssistant(messages: Message[]) {
     },
   );
   clearThinking();
+  md.flush();
   if (printedLabel) process.stdout.write("\n");
   return msg;
 }
