@@ -5,12 +5,13 @@
   "private": true,
   "scripts": {
     "start": "bun run harness/main.ts",
-    "start:legacy": "bun run index.ts"
+    "start:legacy": "bun run index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun test"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
+    "@types/bun": "latest",
     "typescript": "^5"
   },
   "dependencies": {}
