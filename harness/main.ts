@@ -19,6 +19,8 @@ let wasDone = await allTasksDone();
 console.log(c.bold("Interactive harness") + c.dim(" — responses stream live"));
 console.log(c.dim("Commands: /exit quit · /reset clear history · /help show this"));
 console.log();
+console.log(c.bold("Hi there! How can I help?"));
+console.log();
 promptUser();
 
 for await (const line of console) {
