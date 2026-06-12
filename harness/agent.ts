@@ -53,8 +53,13 @@ export async function runTurn(messages: Message[]): Promise<string> {
       tool_calls: assistantMessage.tool_calls,
     });
 
-    for (const toolCall of assistantMessage.tool_calls) {
-      const result = await dispatchToolCall(toolCall);
+    // Execute all tool calls in parallel, then append results in the
+    // original call order so the transcript stays deterministic.
+    const results = await Promise.all(
+      assistantMessage.tool_calls.map(toolCall => dispatchToolCall(toolCall)),
+    );
+    assistantMessage.tool_calls.forEach((toolCall, i) => {
+      const result = results[i] ?? JSON.stringify({ error: "missing tool result" });
       toolResultLine(result);
       messages.push({
         role: "tool",
@@ -62,7 +67,7 @@ export async function runTurn(messages: Message[]): Promise<string> {
         name: toolCall.function.name,
         content: result,
       });
-    }
+    });
 
     if (messages.length > COMPACT_THRESHOLD && !(await allTasksDone())) {
       infoLine("Compacting history...");
