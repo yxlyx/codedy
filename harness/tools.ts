@@ -1,22 +1,6 @@
 import { registerTool } from "./registry";
 import { recall } from "./compaction";
 
-function get_weather(args: Record<string, unknown>): string {
-  const location = args.location;
-  const unit = args.unit ?? "celsius";
-  return JSON.stringify({ location, temperature: 31, unit, condition: "Sunny" });
-}
-
-function add_numbers(args: Record<string, unknown>): string {
-  const a = args.a as number;
-  const b = args.b as number;
-  return JSON.stringify({ result: a + b });
-}
-
-function get_time(_args: Record<string, unknown>): string {
-  return JSON.stringify({ time: new Date().toISOString() });
-}
-
 async function access_bash(args: Record<string, unknown>): Promise<string> {
   const command = args.command as string;
   try {
@@ -52,38 +36,6 @@ async function access_sed(args: Record<string, unknown>): Promise<string> {
     return JSON.stringify({ output: "", stderr: e.stderr ?? String(err), exit_code: e.exitCode ?? 1 });
   }
 }
-
-registerTool("get_weather", {
-  description: "Get the current weather for a given location.",
-  parameters: {
-    type: "object",
-    properties: {
-      location: { type: "string", description: "City and country in the format 'City, CountryCode', e.g. 'Singapore, SG'", minLength: 3 },
-      unit: { type: "string", enum: ["celsius", "fahrenheit"], description: "Temperature unit. Default to celsius." },
-    },
-    required: ["location", "unit"],
-  },
-  fn: get_weather,
-});
-
-registerTool("add_numbers", {
-  description: "Add two numbers together.",
-  parameters: {
-    type: "object",
-    properties: {
-      a: { type: "number", description: "First number to add" },
-      b: { type: "number", description: "Second number to add" },
-    },
-    required: ["a", "b"],
-  },
-  fn: add_numbers,
-});
-
-registerTool("get_time", {
-  description: "Get the current time.",
-  parameters: { type: "object", properties: {}, required: [] },
-  fn: get_time,
-});
 
 registerTool("access_bash", {
   description: "Run a bash shell command and return its stdout/stderr output.",
