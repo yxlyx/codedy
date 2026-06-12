@@ -29,14 +29,14 @@ Configuration is read from environment variables (see `harness/config.ts`). You 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `API_KEY` | _(built-in placeholder)_ | API key sent as the `Authorization: Bearer` header. |
-| `BASE_URL` | `https://gateway.codegraff.com/v1` | Base URL of the chat-completions endpoint. |
-| `MODEL` | `deepseek-v4-pro` | Model name to request. |
+| `CODEGRAFF_API_KEY` | _(required)_ | API key sent as the `Authorization: Bearer` header. `API_KEY` is also supported as a compatibility alias. |
+| `CODEGRAFF_BASE_URL` | `https://gateway.codegraff.com/v1` | Base URL of the chat-completions endpoint. `BASE_URL` is also supported as a compatibility alias. |
+| `CODEGRAFF_MODEL` | `deepseek-v4-pro` | Model name to request. `MODEL` is also supported as a compatibility alias. |
 | `COMPACT_THRESHOLD` | `30` | Message count that triggers history compaction. |
 | `ARCHIVE_DIR` | `/tmp/harness_archive` | Where compacted raw messages are archived. |
 | `TASKS_FILE` | `/tmp/tasks.json` | Path to the agent's task list. |
 
-> **Security note:** `harness/config.ts` currently contains a hard-coded fallback API key. Set `API_KEY` via your environment and avoid committing real secrets.
+> **Security note:** The harness intentionally does not include a fallback API key. Set `CODEGRAFF_API_KEY` or `API_KEY` via your environment and avoid committing real secrets.
 
 ## Usage
 

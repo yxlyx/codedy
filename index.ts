@@ -1,5 +1,20 @@
-const BASE_URL = "https://gateway.codegraff.com/v1";
-const API_KEY = "your_codegraff_api_key_here";
+function readEnv(...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = Bun.env[name];
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function requiredEnv(...names: string[]): string {
+  const value = readEnv(...names);
+  if (value) return value;
+  throw new Error(`Missing required environment variable: set ${names.join(" or ")}`);
+}
+
+const BASE_URL = readEnv("CODEGRAFF_BASE_URL", "BASE_URL") ?? "https://gateway.codegraff.com/v1";
+const API_KEY = requiredEnv("CODEGRAFF_API_KEY", "API_KEY");
+const MODEL = readEnv("CODEGRAFF_MODEL", "MODEL") ?? "deepseek-v4-pro";
 
 type Message = { role: string; content: string | null; tool_call_id?: string; name?: string; tool_calls?: ToolCall[] };
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
@@ -68,7 +83,7 @@ async function chat(msgs: Message[]): Promise<ChatResponse> {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${API_KEY}`,
     },
-    body: JSON.stringify({ model: "deepseek-v4-pro", messages: msgs, tools }),
+    body: JSON.stringify({ model: MODEL, messages: msgs, tools }),
   });
   return res.json() as Promise<ChatResponse>;
 }
@@ -100,7 +115,7 @@ async function summarize(msgs: Message[]): Promise<string> {
       "Authorization": `Bearer ${API_KEY}`,
     },
     body: JSON.stringify({
-      model: "deepseek-v4-pro",
+      model: MODEL,
       messages: [
         {
           role: "system",
