@@ -7,7 +7,7 @@ import { agentLabel, c, errorLine, infoLine, toolLine, toolResultLine } from "./
 import { MarkdownStream } from "./render";
 import type { Message, ToolCall } from "./types";
 
-async function dispatchToolCall(toolCall: ToolCall): Promise<string> {
+export async function dispatchToolCall(toolCall: ToolCall): Promise<string> {
   let tool_name = "(unknown)";
   try {
     const metaArgs = JSON.parse(toolCall.function.arguments) as {
